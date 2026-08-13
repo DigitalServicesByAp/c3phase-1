@@ -156,18 +156,27 @@ export function SelfieVerification() {
             alt="Captured selfie"
             className="h-full w-full rounded-full object-cover"
           />
-        ) : cameraState === "granted" ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="h-full w-full rounded-full object-cover [transform:scaleX(-1)]"
-          />
-        ) : (
+        ) : cameraState === "denied" ? (
           <div className="flex flex-col items-center gap-2 text-[#9aa3b1]">
             <Camera className="h-10 w-10" strokeWidth={1.5} />
             <span className="text-sm">Camera access denied</span>
+          </div>
+        ) : null}
+
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={`h-full w-full rounded-full object-cover [transform:scaleX(-1)] ${
+            cameraState === "granted" && !capturedImage && status !== "success" ? "" : "hidden"
+          }`}
+        />
+
+        {cameraState === "pending" && !capturedImage && status !== "success" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-full bg-[#eef1f5] text-[#9aa3b1]">
+            <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#0f2a4a]/40 border-t-[#0f2a4a]" />
+            <span className="text-sm">Starting camera...</span>
           </div>
         )}
 
