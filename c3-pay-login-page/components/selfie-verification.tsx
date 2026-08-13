@@ -33,15 +33,45 @@ export function SelfieVerification() {
   const [status, setStatus] = useState<Status>("idle")
 
   const startCamera = useCallback(async () => {
+    setCameraState("pending")
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user" },
         audio: false,
       })
       streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
+
+      const video = videoRef.current
+      if (!video) {
+        setCameraState("granted")
+        return
       }
+
+      video.srcObject = stream
+
+      // Wait until the video actually has a frame ready before switching
+      // away from the loading spinner - relying on autoPlay alone can leave
+      // the <video> element rendering blank/white on some mobile browsers.
+      await new Promise<void>((resolve) => {
+        if (video.readyState >= 2) {
+          resolve()
+          return
+        }
+        const handleReady = () => {
+          video.removeEventListener("loadeddata", handleReady)
+          resolve()
+        }
+        video.addEventListener("loadeddata", handleReady)
+      })
+
+      try {
+        await video.play()
+      } catch {
+        // Autoplay can be blocked on some browsers; the feed still renders
+        // once the user interacts with the page, so don't treat this as denial.
+      }
+
       setCameraState("granted")
     } catch {
       setCameraState("denied")
