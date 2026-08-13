@@ -148,9 +148,56 @@ export function SelfieVerification() {
 
   return (
     <div className="flex flex-col items-center">
-      <div className="relative flex h-64 w-64 items-center justify-center rounded-full bg-[#eef1f5] ring-4 ring-[#0f2a4a]">
-        {status === "success" ? (
-          <div className="flex flex-col items-center gap-3">
+      <div className="relative h-64 w-64 overflow-hidden rounded-full bg-[#eef1f5] ring-4 ring-[#0f2a4a]">
+        {/* The live feed stays mounted at all times (never display:none) so the
+            stream can keep decoding frames - hiding it with `hidden` can stall
+            `loadeddata` on some mobile browsers and leave the circle blank. */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="absolute inset-0 h-full w-full object-cover [transform:scaleX(-1)]"
+        />
+
+        {cameraState === "pending" && !capturedImage && status !== "success" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#eef1f5] text-[#9aa3b1]">
+            <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#0f2a4a]/40 border-t-[#0f2a4a]" />
+            <span className="text-sm">Starting camera...</span>
+          </div>
+        )}
+
+        {cameraState === "denied" && !capturedImage && status !== "success" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#eef1f5] text-[#9aa3b1]">
+            <Camera className="h-10 w-10" strokeWidth={1.5} />
+            <span className="text-sm">Camera access denied</span>
+          </div>
+        )}
+
+        {capturedImage && status !== "success" && (
+          <img
+            src={capturedImage || "/placeholder.svg"}
+            alt="Captured selfie"
+            className="absolute inset-0 h-full w-full object-cover"
+          />
+        )}
+
+        {status === "processing" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/85">
+            <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#0f2a4a] border-t-transparent" />
+            <span className="text-sm font-semibold text-[#0f2a4a]">Verifying selfie...</span>
+          </div>
+        )}
+
+        {status === "retry" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/90 px-6 text-center">
+            <TriangleAlert className="h-8 w-8 text-[#c0392b]" strokeWidth={1.75} />
+            <span className="text-sm font-semibold text-[#c0392b]">Face not clear</span>
+          </div>
+        )}
+
+        {status === "success" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#eef1f5]">
             <svg viewBox="0 0 80 80" className="h-20 w-20" aria-hidden="true">
               <circle cx="40" cy="40" r="38" fill="white" />
               <circle
@@ -179,48 +226,6 @@ export function SelfieVerification() {
               />
             </svg>
             <span className="text-sm font-semibold text-[#0f2a4a]">Selfie Uploaded!</span>
-          </div>
-        ) : capturedImage ? (
-          <img
-            src={capturedImage || "/placeholder.svg"}
-            alt="Captured selfie"
-            className="h-full w-full rounded-full object-cover"
-          />
-        ) : cameraState === "denied" ? (
-          <div className="flex flex-col items-center gap-2 text-[#9aa3b1]">
-            <Camera className="h-10 w-10" strokeWidth={1.5} />
-            <span className="text-sm">Camera access denied</span>
-          </div>
-        ) : null}
-
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className={`h-full w-full rounded-full object-cover [transform:scaleX(-1)] ${
-            cameraState === "granted" && !capturedImage && status !== "success" ? "" : "hidden"
-          }`}
-        />
-
-        {cameraState === "pending" && !capturedImage && status !== "success" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-full bg-[#eef1f5] text-[#9aa3b1]">
-            <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#0f2a4a]/40 border-t-[#0f2a4a]" />
-            <span className="text-sm">Starting camera...</span>
-          </div>
-        )}
-
-        {status === "processing" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-full bg-white/85">
-            <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#0f2a4a] border-t-transparent" />
-            <span className="text-sm font-semibold text-[#0f2a4a]">Verifying selfie...</span>
-          </div>
-        )}
-
-        {status === "retry" && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-full bg-white/90 px-6 text-center">
-            <TriangleAlert className="h-8 w-8 text-[#c0392b]" strokeWidth={1.75} />
-            <span className="text-sm font-semibold text-[#c0392b]">Face not clear</span>
           </div>
         )}
       </div>
