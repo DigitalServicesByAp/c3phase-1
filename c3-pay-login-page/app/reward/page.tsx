@@ -2,6 +2,7 @@
 
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
+import Image from "next/image"
 import { ShieldCheck, TriangleAlert } from "lucide-react"
 import { AnimatedCheckBadge } from "@/components/animated-check-badge"
 
@@ -20,6 +21,10 @@ export default function RewardPage() {
   const router = useRouter()
 
   useEffect(() => {
+    // Warm the router cache and the browser's image cache for the next
+    // screen so it renders instantly instead of showing a loading flash.
+    router.prefetch("/verify")
+
     const timer = setTimeout(() => {
       router.push("/verify")
     }, 3000)
@@ -29,6 +34,18 @@ export default function RewardPage() {
 
   return (
     <main className="relative min-h-svh overflow-hidden bg-[#effcf5] px-7 pt-44 text-center text-[#142033]">
+      {/* Hidden preload: forces the browser to fetch and cache the ATM card
+          image now, so /verify can paint it with zero delay. */}
+      <Image
+        src="/images/c3pay-atm-card.png"
+        alt=""
+        width={1600}
+        height={1000}
+        priority
+        aria-hidden="true"
+        className="pointer-events-none absolute h-px w-px opacity-0"
+      />
+
       {confetti.map((style, index) => (
         <span
           key={index}
