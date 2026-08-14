@@ -25,15 +25,41 @@ export function SelfieVerification() {
   async function handleOpenCamera() {
     setCapturedImage(null)
     setStage("starting")
+
+    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+      setStage("denied")
+      return
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: "user" } },
+          audio: false,
+        })
+      } catch {
+        // Some devices/browsers reject specific constraints (e.g. no front
+        // camera, or an OverconstrainedError). Fall back to any camera.
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
       }
+
+      streamRef.current = stream
+
+      // The <video> element is always mounted (see render below), so the
+      // ref is guaranteed to exist here even before "live" state renders.
+      const video = videoRef.current
+      if (video) {
+        video.srcObject = stream
+        // iOS Safari doesn't always honor the `autoPlay` attribute when
+        // srcObject is assigned imperatively — play() explicitly.
+        try {
+          await video.play()
+        } catch {
+          // Ignore: some browsers auto-play once metadata loads.
+        }
+      }
+
       setStage("live")
     } catch {
       setStage("denied")
@@ -87,21 +113,25 @@ export function SelfieVerification() {
   return (
     <div className="flex flex-col items-center">
       <div className="relative flex h-64 w-64 items-center justify-center rounded-full bg-[#eef1f5] ring-4 ring-[#0f2a4a]">
+        {/* Always mounted so the stream can be attached to this element the
+            moment getUserMedia resolves, before "stage" flips to "live". */}
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className={`h-full w-full rounded-full object-cover [transform:scaleX(-1)] ${
+            stage === "live" && !capturedImage ? "block" : "hidden"
+          }`}
+        />
+
         {capturedImage ? (
           <img
             src={capturedImage || "/placeholder.svg"}
             alt="Captured selfie"
             className="h-full w-full rounded-full object-cover"
           />
-        ) : stage === "live" ? (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="h-full w-full rounded-full object-cover [transform:scaleX(-1)]"
-          />
-        ) : stage === "denied" ? (
+        ) : stage === "live" ? null : stage === "denied" ? (
           <div className="flex flex-col items-center gap-2 px-6 text-center text-[#9aa3b1]">
             <TriangleAlert className="h-10 w-10" strokeWidth={1.5} />
             <span className="text-sm">Camera access denied. Please allow camera access and try again.</span>
