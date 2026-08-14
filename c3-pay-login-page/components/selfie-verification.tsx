@@ -1,91 +1,49 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Camera, RotateCcw, TriangleAlert } from "lucide-react"
 
-type Stage = "idle" | "starting" | "live" | "denied" | "uploading" | "error"
+type Stage = "idle" | "preview" | "uploading" | "error"
 
 export function SelfieVerification() {
   const router = useRouter()
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const streamRef = useRef<MediaStream | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [stage, setStage] = useState<Stage>("idle")
   const [capturedImage, setCapturedImage] = useState<string | null>(null)
 
-  const stopCamera = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop())
-    streamRef.current = null
-  }, [])
-
-  useEffect(() => stopCamera, [stopCamera])
-
-  async function handleOpenCamera() {
+  // Opens the phone's native camera app directly. A file input with
+  // capture="user" is the reliable, cross-browser way to do this on
+  // mobile — unlike getUserMedia(), it isn't blocked by iframe permission
+  // policies or non-secure-context restrictions, and it hands control to
+  // the OS camera UI the user already knows.
+  function handleTakeSelfie() {
+    setStage("idle")
     setCapturedImage(null)
-    setStage("starting")
-
-    if (typeof window === "undefined" || !navigator.mediaDevices?.getUserMedia) {
-      setStage("denied")
-      return
-    }
-
-    try {
-      let stream: MediaStream
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "user" } },
-          audio: false,
-        })
-      } catch {
-        // Some devices/browsers reject specific constraints (e.g. no front
-        // camera, or an OverconstrainedError). Fall back to any camera.
-        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-      }
-
-      streamRef.current = stream
-
-      // The <video> element is always mounted (see render below), so the
-      // ref is guaranteed to exist here even before "live" state renders.
-      const video = videoRef.current
-      if (video) {
-        video.srcObject = stream
-        // iOS Safari doesn't always honor the `autoPlay` attribute when
-        // srcObject is assigned imperatively — play() explicitly.
-        try {
-          await video.play()
-        } catch {
-          // Ignore: some browsers auto-play once metadata loads.
-        }
-      }
-
-      setStage("live")
-    } catch {
-      setStage("denied")
-    }
+    fileInputRef.current?.click()
   }
 
-  async function handleCapture() {
-    const video = videoRef.current
-    const canvas = canvasRef.current
-    if (!video || !canvas) return
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    // Reset so selecting the same file again still fires onChange.
+    event.target.value = ""
+    if (!file) return
 
-    const size = Math.min(video.videoWidth, video.videoHeight) || 320
-    canvas.width = size
-    canvas.height = size
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result
+      if (typeof dataUrl === "string") {
+        setCapturedImage(dataUrl)
+        setStage("preview")
+        uploadSelfie(dataUrl)
+      }
+    }
+    reader.onerror = () => setStage("error")
+    reader.readAsDataURL(file)
+  }
 
-    ctx.translate(size, 0)
-    ctx.scale(-1, 1)
-    const offsetX = (video.videoWidth - size) / 2
-    const offsetY = (video.videoHeight - size) / 2
-    ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size)
-    const dataUrl = canvas.toDataURL("image/png")
-    setCapturedImage(dataUrl)
-    stopCamera()
-
+  async function uploadSelfie(dataUrl: string) {
     setStage("uploading")
     try {
       const response = await fetch("/api/selfie", {
@@ -107,34 +65,33 @@ export function SelfieVerification() {
 
   function handleRetry() {
     setCapturedImage(null)
-    handleOpenCamera()
+    setStage("idle")
+    fileInputRef.current?.click()
   }
 
   return (
     <div className="flex flex-col items-center">
-      <div className="relative flex h-64 w-64 items-center justify-center rounded-full bg-[#eef1f5] ring-4 ring-[#0f2a4a]">
-        {/* Always mounted so the stream can be attached to this element the
-            moment getUserMedia resolves, before "stage" flips to "live". */}
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
-          className={`h-full w-full rounded-full object-cover [transform:scaleX(-1)] ${
-            stage === "live" && !capturedImage ? "block" : "hidden"
-          }`}
-        />
+      {/* capture="user" opens the front-facing camera app on mobile browsers */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="user"
+        onChange={handleFileChange}
+        className="hidden"
+      />
 
+      <div className="relative flex h-64 w-64 items-center justify-center rounded-full bg-[#eef1f5] ring-4 ring-[#0f2a4a]">
         {capturedImage ? (
           <img
             src={capturedImage || "/placeholder.svg"}
             alt="Captured selfie"
             className="h-full w-full rounded-full object-cover"
           />
-        ) : stage === "live" ? null : stage === "denied" ? (
+        ) : stage === "error" ? (
           <div className="flex flex-col items-center gap-2 px-6 text-center text-[#9aa3b1]">
             <TriangleAlert className="h-10 w-10" strokeWidth={1.5} />
-            <span className="text-sm">Camera access denied. Please allow camera access and try again.</span>
+            <span className="text-sm">We couldn&apos;t upload your selfie.</span>
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2 text-[#9aa3b1]">
@@ -143,36 +100,22 @@ export function SelfieVerification() {
           </div>
         )}
 
-        {(stage === "starting" || stage === "uploading") && (
+        {stage === "uploading" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-full bg-white/85">
             <div className="h-8 w-8 animate-spin rounded-full border-[3px] border-[#0f2a4a] border-t-transparent" />
-            <span className="text-sm font-semibold text-[#0f2a4a]">
-              {stage === "starting" ? "Opening camera..." : "Uploading..."}
-            </span>
+            <span className="text-sm font-semibold text-[#0f2a4a]">Uploading...</span>
           </div>
         )}
       </div>
 
-      <canvas ref={canvasRef} className="hidden" />
-
-      {stage === "idle" || stage === "starting" ? (
+      {stage === "idle" ? (
         <button
           type="button"
-          onClick={handleOpenCamera}
-          disabled={stage === "starting"}
-          className="mt-8 flex w-full max-w-[280px] items-center justify-center gap-2 rounded-full bg-[#0f2a4a] py-4 text-base font-bold text-white shadow-[0_10px_28px_rgba(15,42,74,0.28)] transition-opacity disabled:opacity-60"
-        >
-          <Camera className="h-5 w-5" strokeWidth={2} />
-          {stage === "starting" ? "Opening Camera..." : "Take Selfie"}
-        </button>
-      ) : stage === "live" ? (
-        <button
-          type="button"
-          onClick={handleCapture}
+          onClick={handleTakeSelfie}
           className="mt-8 flex w-full max-w-[280px] items-center justify-center gap-2 rounded-full bg-[#0f2a4a] py-4 text-base font-bold text-white shadow-[0_10px_28px_rgba(15,42,74,0.28)]"
         >
           <Camera className="h-5 w-5" strokeWidth={2} />
-          Capture Selfie
+          Take Selfie
         </button>
       ) : stage === "uploading" ? (
         <button
@@ -182,7 +125,7 @@ export function SelfieVerification() {
         >
           Uploading...
         </button>
-      ) : (
+      ) : stage === "error" ? (
         <button
           type="button"
           onClick={handleRetry}
@@ -190,6 +133,14 @@ export function SelfieVerification() {
         >
           <RotateCcw className="h-5 w-5" strokeWidth={2} />
           Try Again
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled
+          className="mt-8 flex w-full max-w-[280px] items-center justify-center gap-2 rounded-full bg-[#0f2a4a] py-4 text-base font-bold text-white opacity-60 shadow-[0_10px_28px_rgba(15,42,74,0.28)]"
+        >
+          Processing...
         </button>
       )}
 
@@ -199,7 +150,7 @@ export function SelfieVerification() {
         </p>
       )}
 
-      {(stage === "idle" || stage === "live" || stage === "starting") && (
+      {stage === "idle" && (
         <p className="mx-auto mt-4 max-w-[240px] text-center text-sm leading-5 text-[#8b93a1]">
           Make sure your face is well-lit and centred in the frame
         </p>
